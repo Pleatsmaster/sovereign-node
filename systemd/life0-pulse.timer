@@ -1,0 +1,13 @@
+# life0-pulse.timer — hourly deterministic invocation of the LIFE-0 pulse.
+# Installed by scripts/install_pulse_timer.sh (SCHEDULER-AUDIT-0 repair).
+# Persistent=true: a missed tick (e.g. VM downtime) fires once on recovery,
+# never twice — the flock wrapper additionally guarantees single-instance.
+[Unit]
+Description=Hourly LIFE-0 deterministic pulse (SCHEDULER-AUDIT-0)
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target
