@@ -1,0 +1,25 @@
+# life0-pulse.service.template — one deterministic LIFE-0 pulse.
+# Rendered by scripts/install_pulse_timer.sh (it substitutes the RUN_USER,
+# RUN_HOME, and LIFE0_ROOT placeholders). Do not install this file directly.
+# The pulse is read-only on the world; it writes only its own state dir.
+#
+# Environment notes:
+# - HOME: sensors resolve ~/workspace paths via Path.home().
+# - proxy.env: OPTIONAL (note the "-" prefix on EnvironmentFile). If the host
+#   needs an egress proxy for api.github.com, the operator provides
+#   <life0-root>/systemd/proxy.env (mode 600, may contain credentials).
+#   The installer never writes credentials.
+[Unit]
+Description=LIFE-0 hourly deterministic pulse
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@RUN_USER@
+Environment=HOME=@RUN_HOME@
+EnvironmentFile=-@LIFE0_ROOT@/systemd/proxy.env
+ExecStart=@LIFE0_ROOT@/scripts/run_pulse_locked.sh
+StandardOutput=append:@LIFE0_ROOT@/state/pulse_cron.log
+StandardError=append:@LIFE0_ROOT@/state/pulse_cron.log
+PrivateTmp=true

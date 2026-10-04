@@ -1,8 +1,0 @@
-{
-  "dispatch_dir": "/home/hatch/workspace/namariel-live0/life-0/dispatch/staged",
-  "fact0_db": "/home/hatch/workspace/namariel-live0/fact-0/data/fact0.db",
-  "github_repo": null,
-  "github_repo_fallback_name": "unified_machine",
-  "inbox_dir": "/home/hatch/workspace/namariel-live0/life-0/inbox",
-  "state_dir": "/home/hatch/workspace/namariel-live0/life-0/state"
-}

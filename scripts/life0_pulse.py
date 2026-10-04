@@ -5,12 +5,12 @@ Runs one event-driven pulse: sense three surfaces, detect world deltas,
 form needs, gate, stage mission packages. Makes zero model calls, spends
 nothing, launches nothing.
 
-Intended schedule: hourly via cron (Mata creates the cron after review).
-Example crontab (NOT installed by this script):
+Intended schedule: hourly via cron or systemd (see scripts/install_pulse_timer.sh).
+Example crontab (NOT installed by this script; adapt <life0-root> to the install
+location):
 
-    0 * * * * /home/hatch/workspace/namariel-live0-v0.6.1/.venv/bin/python \\
-        /home/hatch/workspace/namariel-live0/life-0/scripts/life0_pulse.py --once \\
-        >> /home/hatch/workspace/namariel-live0/life-0/state/pulse_cron.log 2>&1
+    0 * * * * python3 <life0-root>/scripts/life0_pulse.py --once \\
+        >> <life0-root>/state/pulse_cron.log 2>&1
 
 Exit codes: 0 = pulse complete (including NO_ACTION); 1 = unexpected failure;
 2 = configuration error.

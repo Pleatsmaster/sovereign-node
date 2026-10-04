@@ -15,8 +15,16 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
-sys.path.insert(0, "/opt/hatch/skills/skill-creator/bin")
-from dynamic_credentials import add_surrogate_to_request, read_json_response
+# The Hatch credential helper is machine-local. The GitHub sensor degrades
+# gracefully without it (sensor_error in the snapshot), per this module's
+# contract: "a failed sensor never crashes the pulse and never fabricates
+# a delta."
+try:
+    sys.path.insert(0, "/opt/hatch/skills/skill-creator/bin")
+    from dynamic_credentials import add_surrogate_to_request, read_json_response
+    _HAVE_CREDENTIAL_HELPER = True
+except Exception:
+    _HAVE_CREDENTIAL_HELPER = False
 
 CRED = "custom.github"
 ALLOWED = ("api.github.com",)
@@ -25,6 +33,8 @@ USER_AGENT = "namariel-life0/1.0"
 
 def github_http_get(path: str, timeout_s: int = 15) -> tuple[int, Any]:
     """Real read-only GET against api.github.com. GET only, always."""
+    if not _HAVE_CREDENTIAL_HELPER:
+        return -1, {"transport_error": "credential helper unavailable: GitHub sensor degraded"}
     url = f"https://api.github.com{path}"
     req = urllib.request.Request(
         url,
