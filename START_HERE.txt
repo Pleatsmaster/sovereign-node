@@ -1,0 +1,18 @@
+SOVEREIGN Research Loop 0 — candidate handoff
+
+Status: implemented and apparatus-verified; not activated on the live node.
+Focused checks: 68/68 pass. Full regression: 158 pass, 2 inherited failures; pulse tests unavailable without external FACT-0.
+
+1. Clone the release into a NEW candidate checkout, leaving the DEMO_2 node untouched:
+   git clone https://github.com/Pleatsmaster/sovereign-node.git sovereign-loop-candidate
+   cd sovereign-loop-candidate
+   git checkout --detach efdfd62bd828a025d0861383d7dc8be4f37c07fd
+
+2. Extract this archive into that candidate checkout. It adds four implementation files and this handoff; it overwrites no original release file.
+
+3. Read RESEARCH_LOOP_0.md. Bind the actual host's existing trusted chain executor to REQUEST.json / result.json. No real executor or live state is shipped in this archive. Initialize once with the actual node path and cumulative launch/time bounds, then run --watch.
+
+4. Validate on the host with the existing runtime and operator authority. Keep B1 dormant; never rerun 031C/031D. Resource-backed work stays on the queue-dispatch path.
+
+The candidate is not merged or pushed. Public GitHub publication was blocked by automatic approval review pending explicit authorization.
+Local candidate commit: 62a6afd1ab9767485646674964cd97a72511cd02

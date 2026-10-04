@@ -1,0 +1,171 @@
+....................................F...............F................... [ 45%]
+........................................................................ [ 90%]
+................                                                         [100%]
+=================================== FAILURES ===================================
+__________________ test_rejected_proposal_blocks_regeneration __________________
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-7/test_rejected_proposal_blocks_0')
+
+    def test_rejected_proposal_blocks_regeneration(tmp_path):
+        life0 = make_life0(tmp_path, "gate-reject")
+        rc, v = scan(life0)
+        assert rc == 0
+        assert gate(life0)["proceed"] is True
+    
+        rc, rec = record_proposal(life0, draft_proposal(life0))
+        assert rc == 0 and rec["recorded"] is True, rec
+        pid = rec["proposal_id"]
+    
+        r = run(str(REVIEW), "--life0", str(life0), "decide",
+                "--proposal-id", pid, "--verdict", "REJECTED",
+                "--reason", "NOT_WORTH_DOING", "--note", "test rejection")
+        assert r.returncode == 0, r.stdout + r.stderr
+    
+        # Rescan: same world, same hash. Regeneration is blocked.
+        rc, v2 = scan(life0)
+        assert rc == 0
+>       assert v2["condition_set_hash"] == v["condition_set_hash"]
+E       AssertionError: assert '3193ac59be28...08c26587bd293' == '723cd9133bb2...dd100f338370e'
+E         
+E         - 723cd9133bb2261c3a9098bbab4eb9ec3979815a6503b443574dd100f338370e
+E         + 3193ac59be28a35aee9e25ce0dba30fc01a2605cb896c16eafa08c26587bd293
+
+tests/test_agenda_proposal.py:272: AssertionError
+________________________ test_happy_path_two_step_chain ________________________
+
+env = {'pkg': PosixPath('/tmp/pytest-of-root/pytest-7/test_happy_path_two_step_chain0/pkg'), 'snaps': PosixPath('/tmp/pytest...son'), 'ledger': PosixPath('/tmp/pytest-of-root/pytest-7/test_happy_path_two_step_chain0/pkg/CHAIN_LEDGER.jsonl'), ...}
+
+    def test_happy_path_two_step_chain(env):
+        # s00: 7/8, d4 unsatisfied (mechanical gap, as on 2026-10-01).
+        snap0 = _publish(env, _stage(env, "staging-s00", _decision([BAD_SOURCE])),
+                         f"{CHAIN}-s00", 0)
+        rc = _evaluate(env, f"{CHAIN}-s00", "none", 0, snap0)
+        assert rc == 0
+        assert _ledger_entries(env)[-1]["chain_decision"] == "CONTINUE_ELIGIBLE"
+    
+        vpath = _eligible_classification(env, snap0)
+        rc = disp.cmd_authorize(Namespace(
+            contract=str(env["contract"]),
+            proposal=str(env["pkg"] / "CHAIN_PROPOSAL_s01.json"),
+            ledger=str(env["ledger"]), classification=str(vpath),
+            snapshots_dir=str(env["snaps"]), write_auth=str(env["snaps"])))
+        assert rc == 0
+        auth_path = env["snaps"] / "DISPATCH_AUTH_s01.json"
+        tok = json.loads(auth_path.read_text())
+        assert tok["step_id"] == f"{CHAIN}-s01"
+    
+        # A second token for the same parent: fan-out forbidden.
+        rc = disp.cmd_authorize(Namespace(
+            contract=str(env["contract"]),
+            proposal=str(env["pkg"] / "CHAIN_PROPOSAL_s01.json"),
+            ledger=str(env["ledger"]), classification=str(vpath),
+            snapshots_dir=str(env["snaps"]), write_auth=str(env["snaps"])))
+        assert rc == 3
+    
+        # s01: worker amends the s00 snapshot content, fixes the gap.
+        st1 = env["tmp"] / "staging-s01"
+        st1.mkdir()
+        for f in snap0.iterdir():
+            if f.name != "STEP_COMPLETED.json":
+                shutil.copy(f, st1 / f.name)
+        (st1 / "EXPERIENCE_COMPRESSION_DECISION.json").write_text(
+            json.dumps(_decision([GOOD_SOURCE]), indent=2, sort_keys=True) + "\n")
+        snap1 = _publish(env, st1, f"{CHAIN}-s01", 1)
+        rc = _evaluate(env, f"{CHAIN}-s01", f"{CHAIN}-s00", 1, snap1, auth_path)
+        assert rc == 0
+        last = _ledger_entries(env)[-1]
+>       assert last["chain_decision"] == "STOP_GOAL_SATISFIED"
+E       AssertionError: assert 'STOP_NO_PROGRESS' == 'STOP_GOAL_SATISFIED'
+E         
+E         - STOP_GOAL_SATISFIED
+E         + STOP_NO_PROGRESS
+
+tests/test_chain_hardening.py:338: AssertionError
+----------------------------- Captured stdout call -----------------------------
+{
+  "files": 2,
+  "published": true,
+  "snapshot": "/tmp/pytest-of-root/pytest-7/test_happy_path_two_step_chain0/snaps/s00",
+  "snapshot_hash": "d32ef65676bd6a061f7a87f7e6733faf0ec7a260fa29c3ee38903a3f538e86e0",
+  "step_id": "chain-test-001-s00"
+}
+{
+  "authority": "AUTO-CONTINUE-0",
+  "chain_decision": "CONTINUE_ELIGIBLE",
+  "chain_id": "chain-test-001",
+  "evaluated_at": "2026-10-04T11:40:15.921467+00:00",
+  "ledger": "/tmp/pytest-of-root/pytest-7/test_happy_path_two_step_chain0/pkg/CHAIN_LEDGER.jsonl",
+  "satisfied": [
+    "d1_outcome_single_allowed",
+    "d2_decision_validates",
+    "d3_required_fields",
+    "d5_no_forbidden_mutation",
+    "d6_rationale_exists",
+    "d7_no_promotion",
+    "d8_credit_none"
+  ],
+  "step_id": "chain-test-001-s00",
+  "stop_reason": "unsatisfied predicates decreased 8 -> 1; a continuation may be proposed",
+  "unsatisfied": [
+    "d4_sources_resolve"
+  ]
+}
+{
+  "authority": "AUTO-CONTINUE-0",
+  "chain_id": "chain-test-001",
+  "evaluated_at": "2026-10-04T11:40:15.921880+00:00",
+  "parent_snapshot_hash": "d32ef65676bd6a061f7a87f7e6733faf0ec7a260fa29c3ee38903a3f538e86e0",
+  "parent_step_id": "chain-test-001-s00",
+  "proposal_depth": 1,
+  "reasons": [],
+  "target_predicate": "d4_sources_resolve",
+  "verdict": "ELIGIBLE"
+}
+{
+  "authority": "AUTO-CONTINUE-0",
+  "authorized": true,
+  "evaluated_at": "2026-10-04T11:40:15.922591+00:00",
+  "parent_snapshot_hash": "d32ef65676bd6a061f7a87f7e6733faf0ec7a260fa29c3ee38903a3f538e86e0",
+  "parent_step_id": "chain-test-001-s00",
+  "step_id": "chain-test-001-s01",
+  "token": "/tmp/pytest-of-root/pytest-7/test_happy_path_two_step_chain0/snaps/DISPATCH_AUTH_s01.json"
+}
+{
+  "authority": "AUTO-CONTINUE-0",
+  "authorized": false,
+  "detail": "fan-out forbidden: DISPATCH_AUTH_s01.json",
+  "evaluated_at": "2026-10-04T11:40:15.923061+00:00",
+  "reason": "parent already has a dispatch token"
+}
+{
+  "files": 2,
+  "published": true,
+  "snapshot": "/tmp/pytest-of-root/pytest-7/test_happy_path_two_step_chain0/snaps/s01",
+  "snapshot_hash": "17d546bda2217f5b014772587b5c5cdcd2d49ee2274c93626c59e5fc36bb08a1",
+  "step_id": "chain-test-001-s01"
+}
+{
+  "authority": "AUTO-CONTINUE-0",
+  "chain_decision": "STOP_NO_PROGRESS",
+  "chain_id": "chain-test-001",
+  "evaluated_at": "2026-10-04T11:40:15.925562+00:00",
+  "ledger": "/tmp/pytest-of-root/pytest-7/test_happy_path_two_step_chain0/pkg/CHAIN_LEDGER.jsonl",
+  "satisfied": [
+    "d1_outcome_single_allowed",
+    "d2_decision_validates",
+    "d3_required_fields",
+    "d5_no_forbidden_mutation",
+    "d6_rationale_exists",
+    "d7_no_promotion",
+    "d8_credit_none"
+  ],
+  "step_id": "chain-test-001-s01",
+  "stop_reason": "unsatisfied predicate count did not strictly decrease and no concrete blocker was produced",
+  "unsatisfied": [
+    "d4_sources_resolve"
+  ]
+}
+=========================== short test summary info ============================
+FAILED tests/test_agenda_proposal.py::test_rejected_proposal_blocks_regeneration
+FAILED tests/test_chain_hardening.py::test_happy_path_two_step_chain - Assert...
+2 failed, 158 passed in 15.80s
