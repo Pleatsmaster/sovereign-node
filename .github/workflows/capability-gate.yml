@@ -43,7 +43,7 @@ jobs:
 
       # The triggering commit, not the branch name: the branch can move while
       # a job waits, which would test different files than the triggering commit.
-      - uses: actions/checkout@11bd71929d5492f1f10c29422dfb8919d1fb24e # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.sha }}
 
