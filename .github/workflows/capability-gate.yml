@@ -1,0 +1,130 @@
+# Bounded worker-capability screening.
+#
+# Runs the FROZEN capability gate v2.2 against the Qwen2.5-3B-Instruct Q4_K_M
+# candidate on a GitHub-hosted runner. This branch is screening apparatus only:
+# main stays frozen at efdfd62; no release files are touched.
+#
+# Trigger: push to screening/capability-gate-v2 starts the run (workflow_dispatch
+# requires the workflow on the default branch, which is frozen). Uploading the
+# branch files triggers the run; main is never touched.
+#
+# What this establishes: a screening COMPLETED/PASS/FAIL of the qualification
+# gate (3/3 labels + 12/12 field assignments). A PASS justifies further bounded
+# evaluation; it does NOT establish chain competence and activates no executor.
+#
+# Verdict posture: job green means the SCREEN COMPLETED (valid results exist;
+# the model's PASS/FAIL is in the summary). INFRASTRUCTURE_ERROR or TIMEOUT
+# fails the job with qualification UNDETERMINED. The qualification decision
+# itself is recomputed locally from the returned outputs; runner-reported
+# identity/timing/RSS values are preserved as runner-reported, not proven.
+
+name: capability-gate-v2-screening
+
+on:
+  push:
+    branches: [screening/capability-gate-v2]
+
+defaults:
+  run:
+    shell: bash  # GitHub's bash shell enables -eo pipefail: pipeline failures propagate
+
+jobs:
+  screen:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Record runner environment
+        run: |
+          echo "ImageVersion=${ImageVersion:-unknown}"
+          cat /etc/os-release
+          uname -a
+          nproc
+          free -m
+
+      # The triggering commit, not the branch name: the branch can move while
+      # a job waits, which would test different files than the triggering commit.
+      - uses: actions/checkout@11bd71929d5492f1f10c29422dfb8919d1fb24e # v4
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned runtime
+        run: |
+          python3 -m pip install --upgrade "pip==25.0.1"
+          python3 -m pip install "llama-cpp-python==0.3.36" \
+            --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+          python3 -c "import llama_cpp; print('llama_cpp imported OK')"
+
+      - name: Verify frozen instrument
+        run: |
+          echo "76d0f7ccc31218a09e31718895f264716fcb3cf584743dbddb1de5b54b295108  screening/capability_task_v2_2.py" \
+            | sha256sum -c -
+
+      - name: Download candidate model (revision-pinned, hash-verified)
+        run: |
+          # Pinned to the model-repository revision, not mutable resolve/main.
+          # The expected SHA-256 was computed from this exact revision; the
+          # check fails the step unless the downloaded bytes are the intended
+          # candidate. Recording a hash afterward would not establish that.
+          curl --fail --show-error --location -o qwen2.5-3b-instruct-q4_k_m.gguf \
+            "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/7dabda4d13d513e3e842b20f0d435c732f172cbe/qwen2.5-3b-instruct-q4_k_m.gguf"
+          echo "626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d  qwen2.5-3b-instruct-q4_k_m.gguf" | sha256sum -c -
+          ls -la qwen2.5-3b-instruct-q4_k_m.gguf
+
+      - name: Run frozen capability gate v2.2
+        id: gate
+        timeout-minutes: 55
+        run: |
+          # Inner timeout (50 min) is shorter than the step timeout so the
+          # summary step still runs and can report TIMEOUT distinctly.
+          # pipefail (via bash default) preserves python's exit status.
+          timeout 3000 python3 screening/capability_task_v2_2.py \
+            qwen2.5-3b-instruct-q4_k_m.gguf > gate_stdout.log 2> gate_stderr.log
+          echo "GATE_EXIT=$?" > gate_exit.txt
+          cat gate_stdout.log
+
+      - name: Write screening summary
+        id: summarize
+        if: always()
+        run: |
+          python3 - <<'EOF'
+          import json
+          try:
+              exit_code = int(open('gate_exit.txt').read().strip().split('=')[1])
+          except Exception:
+              exit_code = None  # gate step never ran to completion (killed)
+          try:
+              report = json.loads(open('gate_stdout.log').read())
+              valid = isinstance(report, dict) and 'passed' in report and 'raw_output' in report
+          except Exception:
+              report, valid = None, False
+          if valid and exit_code == 0:
+              summary = {"status": "COMPLETED",
+                         "qualification": "PASS" if report["passed"] else "FAIL",
+                         "fields_correct": report.get("fields_correct"),
+                         "label_match": report.get("label_match")}
+          elif exit_code == 124:
+              summary = {"status": "TIMEOUT", "qualification": "UNDETERMINED"}
+          else:
+              summary = {"status": "INFRASTRUCTURE_ERROR",
+                         "qualification": "UNDETERMINED", "gate_exit": exit_code}
+          json.dump(summary, open('screening_summary.json', 'w'), indent=1)
+          print(json.dumps(summary, indent=1))
+          # Green means the screen completed; infra failure/timeout fails the job.
+          # The qualification decision is recomputed locally from gate_stdout.log.
+          raise SystemExit(0 if summary["status"] == "COMPLETED" else 1)
+          EOF
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: capability-gate-v2-results
+          path: |
+            gate_stdout.log
+            gate_stderr.log
+            gate_exit.txt
+            screening_summary.json
+          if-no-files-found: error
