@@ -1,0 +1,87 @@
+# GO-3 — Qualification Execution (3 fresh C1 instances, frozen gate)
+#
+# REGISTERED ON main. Checkout pinned to the reviewed harness commit.
+# Manually triggered. Runs the frozen GO-3 worker-qualification gate:
+# three fresh C1 instances against Qwen2.5-3B via the frozen four-tool
+# interface. No prompt changes, no rescues, no retries.
+#
+# Budget: the frozen gate caps the run at 30 minutes TOTAL, measured from
+# QUAL_START_EPOCH (set below before provisioning). run_qualification.py
+# enforces it; the report states whether it held.
+
+name: GO-3 Qualification Execution
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  HARNESS_SHA: e362870235a232cf0189a95815c9ae0b67b07a18
+  MODEL_URL: https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/7dabda4d13d513e3e842b20f0d435c732f172cbe/qwen2.5-3b-instruct-q4_k_m.gguf
+  MODEL_SHA256: 626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d
+  CONTRACT_SHA256: dce28a328c306e34f5b0f28dfe9e6be2bd70e4aef93da8ff49227ff788d728d3
+  RAM_REQUIRED_GIB: "3.5"
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Start gate budget clock
+        run: echo "QUAL_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Checkout pinned harness commit
+        uses: actions/checkout@v4
+        with:
+          ref: e362870235a232cf0189a95815c9ae0b67b07a18
+
+      - name: Resource admission (fail closed)
+        run: python3 go3a/check_ram.py
+
+      - name: Install runtime dependencies (fail closed)
+        run: |
+          python3 -m pip install --quiet "llama-cpp-python==0.3.36" pytest
+          python3 -c "import llama_cpp; print('llama_cpp imported OK')"
+
+      - name: Provision model (fail closed on hash)
+        run: python3 go3a/provision_model.py
+
+      - name: Verify frozen worker-contract hash (fail closed)
+        run: python3 go3a/check_contract.py
+
+      - name: Configure reviewed baselines (fail closed)
+        run: |
+          eval "$(python3 go3a/configure_baselines.py | grep '^export ')"
+          echo "RELATIONAL0_UM_ROOT=$RELATIONAL0_UM_ROOT" >> "$GITHUB_ENV"
+          echo "RELATIONAL0_WORKER_SHIM=$RELATIONAL0_WORKER_SHIM" >> "$GITHUB_ENV"
+
+      - name: Start worker backend (fail closed)
+        run: |
+          WORKER_TEMPERATURE=0.0 WORKER_THREADS=4 nohup python3 worker/qwen_server.py \
+            "$PWD/qwen3b.gguf" --ctx 4096 > qwen_server.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -s -m 3 -X POST http://127.0.0.1:8471/complete \
+                -H 'Content-Type: application/json' \
+                -d '{"user":"reply with {}","max_tokens":8}' | grep -q text; then
+              echo "worker backend up"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "FAIL-CLOSED: worker backend did not start"
+          exit 1
+
+      - name: Run GO-3 qualification (3 fresh instances)
+        run: python3 go3a/run_qualification.py
+
+      - name: Upload qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go3-qualification
+          path: qual/
