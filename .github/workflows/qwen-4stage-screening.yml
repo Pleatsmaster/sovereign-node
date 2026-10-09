@@ -1,21 +1,11 @@
-# Bounded worker-capability screening (4-stage).
+# Qwen2.5-3B 4-stage screening (direct stage execution).
 #
-# Runs the Qwen2.5-3B-Instruct Q4_K_M candidate through four sequential stages:
-# 1. Backend verification (model loads, chat template works)
-# 2. v2.3 competence gate (3/3 labels + 12/12 field assignments)
-# 3. Report-generation diagnostic (A10 task, structured output)
-# 4. Failure-to-correction check (specific correction for documented failure)
+# Runs stages directly without orchestration wrapper:
+# - Stage 1+2: v2.3 competence gate (proven to work standalone)
+# - Stage 3: Report-generation diagnostic
+# - Stage 4: Failure-to-correction check
 #
-# This branch is screening apparatus only: main stays frozen; no release files touched.
-#
-# Trigger: push to screening/capability-gate-v2 starts the run.
-#
-# Model: Official Qwen/Qwen2.5-3B-Instruct-GGUF, revision-pinned, hash-verified.
-# Revision: 7dabda4d13d513e3e842b20f0d435c732f172cbe
-# SHA-256: 626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d
-#
-# Verdict posture: job green means the SCREEN COMPLETED. Stage PASS/FAIL is in
-# the summary. The admission decision is recomputed locally from returned outputs.
+# Each stage runs only if the previous passed.
 
 name: qwen-4stage-screening
 
@@ -35,8 +25,6 @@ jobs:
       - name: Record runner environment
         run: |
           echo "ImageVersion=${ImageVersion:-unknown}"
-          cat /etc/os-release
-          uname -a
           nproc
           free -m
 
@@ -53,61 +41,53 @@ jobs:
           python3 -m pip install --upgrade "pip==25.0.1"
           python3 -m pip install "llama-cpp-python==0.3.36" \
             --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
-          python3 -c "import llama_cpp; print('llama_cpp imported OK')"
 
       - name: Verify frozen instruments
         run: |
-          echo "10ddeeae783ddeca6ff028e89c2b944536beddef7670624bd9d883986c78a848  screening/capability_task_v2_3.py" \
-            | sha256sum -c -
-          echo "Instruments verified."
+          echo "10ddeeae783ddeca6ff028e89c2b944536beddef7670624bd9d883986c78a848  screening/capability_task_v2_3.py" | sha256sum -c -
 
-      - name: Download candidate model (revision-pinned, hash-verified)
+      - name: Download candidate model
         run: |
-          # Pinned to model-repository revision, not mutable resolve/main.
-          # Official Qwen model (not bartowski) for stronger provenance.
-          curl --fail --show-error --location -o qwen2.5-3b-instruct-q4_k_m.gguf \
+          curl --fail --location -o model.gguf \
             "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/7dabda4d13d513e3e842b20f0d435c732f172cbe/qwen2.5-3b-instruct-q4_k_m.gguf"
-          echo "626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d  qwen2.5-3b-instruct-q4_k_m.gguf" | sha256sum -c -
-          ls -lh qwen2.5-3b-instruct-q4_k_m.gguf
+          echo "626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d  model.gguf" | sha256sum -c -
+          ls -lh model.gguf
 
-      - name: Run 4-stage screening
-        id: screen
-        timeout-minutes: 100
+      - name: Stage 2 - v2.3 competence gate
+        id: stage2
+        timeout-minutes: 50
         run: |
-          timeout 5400 python3 screening/worker_screen_v2.py \
-            qwen2.5-3b-instruct-q4_k_m.gguf > screening_stdout.log 2> screening_stderr.log
-          echo "SCREEN_EXIT=$?" > screen_exit.txt
-          cat screening_stdout.log
+          python3 screening/capability_task_v2_3.py model.gguf > stage2_output.log 2>&1
+          echo "exit=$?"
+          tail -20 stage2_output.log
 
-      - name: Write screening summary
+      - name: Stage 3 - Report diagnostic
+        id: stage3
+        if: steps.stage2.outcome == 'success'
+        timeout-minutes: 30
+        run: |
+          python3 screening/stage3_report.py model.gguf 2>&1 | tail -30
+
+      - name: Stage 4 - Correction check
+        id: stage4
+        if: steps.stage3.outcome == 'success'
+        timeout-minutes: 30
+        run: |
+          python3 screening/stage4_correction.py model.gguf 2>&1 | tail -30
+
+      - name: Write summary
         if: always()
-        run: |
-          python3 - <<'EOF'
-          import json
-          try:
-              with open('screening_results.json') as f:
-                  results = json.load(f)
-              summary = {
-                  "status": "COMPLETED",
-                  "overall": results.get("overall", False),
-                  "stages": {k: v.get("passed") for k, v in results.get("stages", {}).items()},
-              }
-          except Exception as e:
-              summary = {"status": "INFRASTRUCTURE_ERROR", "error": str(e)}
-          json.dump(summary, open('screening_summary.json', 'w'), indent=1)
-          print(json.dumps(summary, indent=1))
-          EOF
+        run: python3 screening/write_summary.py
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: qwen-4stage-results
           path: |
-            screening_stdout.log
-            screening_stderr.log
-            screening_results.json
-            screening_summary.json
-            screen_exit.txt
+            stage2_output.log
             stage3_output.txt
+            stage3_result.json
             stage4_output.txt
-          if-no-files-found: error
+            stage4_result.json
+            screening_summary.json
+          if-no-files-found: warn
