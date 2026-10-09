@@ -37,8 +37,8 @@ def stage1_backend(model_path):
         from llama_cpp import Llama
         log("  llama_cpp imported OK")
 
-        log("  Loading model (n_ctx=1152, n_threads=2)...")
-        llm = Llama(model_path=model_path, n_ctx=1152, n_threads=2, verbose=False)
+        log("  Loading model (n_ctx=512, n_threads=2)...")
+        llm = Llama(model_path=model_path, n_ctx=512, n_threads=2, verbose=False)
         log("  Model loaded OK")
 
         # Check metadata (gracefully)
@@ -134,7 +134,7 @@ def stage3_report(model_path):
     llm = None
     try:
         from llama_cpp import Llama
-        llm = Llama(model_path=model_path, n_ctx=1152, n_threads=2, verbose=False)
+        llm = Llama(model_path=model_path, n_ctx=1024, n_threads=2, verbose=False)
         log("  Model loaded for stage 3")
 
         prompt = """You are a research assistant. Read the evidence and write a structured report.
@@ -196,7 +196,7 @@ def stage4_correction(model_path):
     llm = None
     try:
         from llama_cpp import Llama
-        llm = Llama(model_path=model_path, n_ctx=1152, n_threads=2, verbose=False)
+        llm = Llama(model_path=model_path, n_ctx=1024, n_threads=2, verbose=False)
         log("  Model loaded for stage 4")
 
         prompt = """A worker was asked to write a structured report from evidence.
