@@ -1,0 +1,95 @@
+# GO-3A — Qualification Harness Readiness (readiness only)
+#
+# REGISTER ON THE DEFAULT BRANCH (main) via the GitHub web UI:
+#   .github/workflows/go3a-readiness.yml
+# The checkout below is pinned to the reviewed harness commit, so the code
+# under evaluation cannot drift with branch updates.
+#
+# Manually triggered. Provisions Qwen2.5-3B on an ephemeral GitHub runner and
+# proves the runner can execute the frozen GO-3 gate WITHOUT changing its
+# scientific conditions. Fail-closed at every step.
+#
+# This workflow does NOT run the three GO-3 qualification instances. Those
+# remain behind the separate GO-3 execution decision (HOLD).
+#
+# Budget note: the frozen GO-3 gate caps qualification at 30 min total. This
+# preparation measures provisioning time and reports it separately; it does
+# not reinterpret the gate budget. The 90-minute timeout here is acceptable
+# because the qualification budget is not being spent.
+
+name: GO-3A Qualification Harness Readiness
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  HARNESS_SHA: ec453ef7557b2183c8d705385337f0f3b870211f
+  MODEL_URL: https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/7dabda4d13d513e3e842b20f0d435c732f172cbe/qwen2.5-3b-instruct-q4_k_m.gguf
+  MODEL_SHA256: 626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d
+  CONTRACT_SHA256: dce28a328c306e34f5b0f28dfe9e6be2bd70e4aef93da8ff49227ff788d728d3
+  RAM_REQUIRED_GIB: "3.5"
+
+jobs:
+  readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout pinned harness commit
+        uses: actions/checkout@v4
+        with:
+          ref: ec453ef7557b2183c8d705385337f0f3b870211f
+
+      - name: Resource admission (fail closed)
+        run: python3 go3a/check_ram.py
+
+      - name: Install runtime dependencies (fail closed)
+        run: |
+          START=$(date +%s)
+          python3 -m pip install --quiet "llama-cpp-python==0.3.36" pytest
+          python3 -c "import llama_cpp; print('llama_cpp imported OK')"
+          echo "deps_seconds=$(( $(date +%s) - START ))" >> "$GITHUB_ENV"
+
+      - name: Provision model (fail closed on hash)
+        run: |
+          START=$(date +%s)
+          python3 go3a/provision_model.py
+          echo "provision_seconds=$(( $(date +%s) - START ))" >> "$GITHUB_ENV"
+
+      - name: Verify frozen worker-contract hash (fail closed)
+        run: python3 go3a/check_contract.py
+
+      - name: Configure reviewed baselines (fail closed)
+        run: |
+          eval "$(python3 go3a/configure_baselines.py | grep '^export ')"
+          echo "RELATIONAL0_UM_ROOT=$RELATIONAL0_UM_ROOT" >> "$GITHUB_ENV"
+          echo "RELATIONAL0_WORKER_SHIM=$RELATIONAL0_WORKER_SHIM" >> "$GITHUB_ENV"
+          echo "CHAIN_ADAPTER_CONFIG=$CHAIN_ADAPTER_CONFIG" >> "$GITHUB_ENV"
+
+      - name: Reproduce frozen GO-2 execution path (fail closed)
+        run: |
+          START=$(date +%s)
+          python3 go3a/run_gate_tests.py
+          echo "tests_seconds=$(( $(date +%s) - START ))" >> "$GITHUB_ENV"
+
+      - name: Worker backend smoke test (fail closed)
+        run: |
+          START=$(date +%s)
+          python3 go3a/smoke_backend.py
+          echo "smoke_seconds=$(( $(date +%s) - START ))" >> "$GITHUB_ENV"
+
+      - name: Write readiness report (honest verdict)
+        if: always()
+        run: python3 go3a/write_report.py
+
+      - name: Upload readiness report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go3a-readiness-report
+          path: go3a-readiness-report.json
