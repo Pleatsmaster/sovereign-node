@@ -1,0 +1,27 @@
+name: DEMO_3
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  demo3:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout harness (demo3-gha branch)
+        uses: actions/checkout@v4
+      - name: Checkout pinned sovereign-node release into node/
+        uses: actions/checkout@v4
+        with:
+          repository: Pleatsmaster/sovereign-node
+          ref: efdfd62bd828a025d0861383d7dc8be4f37c07fd
+          path: node
+      - name: Run DEMO_3 driver
+        run: python3 demo3/demo3.py
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo3-evidence
+          path: evidence/
+          if-no-files-found: warn
