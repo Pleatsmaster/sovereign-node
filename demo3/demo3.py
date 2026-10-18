@@ -6,6 +6,13 @@ LOCAL_NODE_REPRO_DEMO_3_ADDENDUM.md. Executes phases 0-7 against the pinned
 sovereign-node release checked out in ./node, with a frozen local-inference
 task run on two worker stacks (llama-cpp-python, then Ollama serving the
 same GGUF). Writes evidence/ and results.json. Exit 0 iff all phases PASS.
+
+AMENDMENT A1 (authorized by Stephan, 2026-10-18, after run 39146126987):
+Phase 3B's worker A now answers in a FRESH interpreter
+(demo3/worker_a.py). Run 39146126987 failed 3B because pip installed
+llama-cpp-python successfully (rc=0) but the already-running driver
+process could not import the just-installed package. Prompts, scoring
+(>=2/3), and every other phase are unchanged from the frozen harness.
 """
 import hashlib, json, os, platform, subprocess, sys, time, urllib.request
 from pathlib import Path
@@ -30,12 +37,12 @@ def sha256(p):
             h.update(chunk)
     return h.hexdigest()
 
-def run(cmd, cwd=None, timeout=600, env=None, log=None):
+def run(cmd, cwd=None, timeout=600, env=None, log=None, input_text=None):
     t0 = time.time()
     e = dict(os.environ)
     if env: e.update(env)
     try:
-        r = subprocess.run(cmd, cwd=cwd, timeout=timeout, capture_output=True, text=True, env=e)
+        r = subprocess.run(cmd, cwd=cwd, timeout=timeout, capture_output=True, text=True, env=e, input=input_text)
         out, rc, timed = (r.stdout or "") + (r.stderr or ""), r.returncode, False
     except subprocess.TimeoutExpired as ex:
         out, rc, timed = ((ex.stdout or b"").decode(errors="replace") if isinstance(ex.stdout, bytes) else (ex.stdout or "")), -9, True
@@ -59,11 +66,15 @@ def pulse(tag):
     if pl.exists(): lines = sum(1 for _ in open(pl))
     return rc, out.strip()[:400], dt, state, lines
 
+def build_prompt(note, q):
+    return f"Use only this note to answer.\n\n{note}\n\nQuestion: {q}\nAnswer with only the answer value, nothing else."
+
+
 def ask_all(stack_fn):
     answers, score, wall = [], 0, 0.0
     note = (ROOT / "demo3/input.txt").read_text().strip()
     for q, expect in QUESTIONS:
-        prompt = f"Use only this note to answer.\n\n{note}\n\nQuestion: {q}\nAnswer with only the answer value, nothing else."
+        prompt = build_prompt(note, q)
         t0 = time.time()
         try: ans = stack_fn(prompt)
         except Exception as ex: ans = f"ERROR: {ex}"
@@ -130,14 +141,23 @@ def main():
             rc, out, dt = run([sys.executable, "-m", "pip", "install", "--quiet", "llama-cpp-python",
                                "--extra-index-url", "https://abetlen.github.io/llama-cpp-python/whl/cpu"], timeout=1500, log="pip_llama_wheel.log")
         try:
-            import llama_cpp
-            results["worker_a_version"] = getattr(llama_cpp, "__version__", "unknown")
-            llm = llama_cpp.Llama(model_path=str(MODEL), n_ctx=2048, verbose=False)
-            def fn_a(prompt):
-                r = llm.create_chat_completion(messages=[{"role": "user", "content": prompt}], temperature=0.0, max_tokens=64)
-                return r["choices"][0]["message"]["content"]
-            a_answers, a_score, a_wall = ask_all(fn_a)
-            a_detail = f"score {a_score}/3 wall={a_wall:.1f}s"
+            note = (ROOT / "demo3/input.txt").read_text().strip()
+            prompts = [build_prompt(note, q) for q, _ in QUESTIONS]
+            out_path = ROOT / "worker_a_out.json"
+            t0 = time.time()
+            rc_a, out_a, dt_a = run([sys.executable, str(ROOT / "demo3/worker_a.py"), str(MODEL), str(out_path)],
+                                    timeout=1200, log="worker_a.log",
+                                    input_text=json.dumps(prompts))
+            a_wall = time.time() - t0
+            if rc_a != 0:
+                raise RuntimeError(f"worker_a rc={rc_a}: {out_a[-300:]}")
+            payload = json.loads(out_path.read_text())
+            results["worker_a_version"] = payload.get("version", "unknown")
+            for (q, expect), ans in zip(QUESTIONS, payload["answers"]):
+                ok = expect in (ans or "").lower()
+                a_score += 1 if ok else 0
+                a_answers.append({"q": q, "expected": expect, "answer": (ans or "")[:500], "correct": ok})
+            a_detail = f"score {a_score}/3 wall={a_wall:.1f}s (fresh-interpreter worker A)"
         except Exception as ex:
             a_detail = f"worker A error: {ex}"
     else:
